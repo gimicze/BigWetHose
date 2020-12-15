@@ -1,181 +1,273 @@
---[[
-Please Read : The only thing you can configure is the specific particle that comes out of the hose. You can modify this if you with for something like flames to come out.
---]]
-firehose = {}
-firehose.dictionary = "core"
-firehose.particle = "water_cannon_jet"
-firehose.particletwo = "water_cannon_spray"
+local dict = "core"
+local streamParticles = "water_cannon_jet"
+local splashParticles = "water_cannon_spray"
+local ped = nil
 
---[[
-Do not touch!
---]]
+local x, y, z = nil
+local xx, yy, zz = nil
 
-local x,y,z = table.unpack(GetEntityCoords(playerPed))
-local xx,yy,zz = table.unpack(GetEntityForwardVector(playerPed))
-xx = xx * 5
-yy = yy * 5
+local ActiveEffects = {}
+local pressed = false
 
-local player = PlayerPedId()
-local ped = PlayerPedId()
+local hoseNozzle = nil
 
-local enabled = false
+local hasExtinguisher = false
+local extinguisherAmmo = 0
+local weaponHash = GetHashKey("WEAPON_FIREEXTINGUISHER")
 
-RegisterCommand('hose', function(source, args, raw)
-	if enabled == true then
-		enabled = false  
-		TriggerEvent('chat:addMessage', {
-			color = { 255, 0, 0},
-			multiline = true,
-			args = {"Engineer", "Water is shutoff"}
-		  })
-		  print(enabled)
-	else
-		enabled = true
-		TriggerEvent('chat:addMessage', {
-			color = { 255, 0, 0},
-			multiline = true,
-			args = {"Me", "Water is flowing"}
-		  })
-		print(enabled)
-	end
-end, false)
-
-Citizen.CreateThread(function()
-	while true do 
-		Citizen.Wait(10000)
-		RequestNamedPtfxAsset(firehose.dictionary)
-		while not HasNamedPtfxAssetLoaded(firehose.dictionary) do
-			Citizen.Wait(0)
-		end
-
-		print('\n[PARTICLES] Finished updating particle directory.')
-	end
-end)
-
-
-Citizen.CreateThread(function()
-	RequestNamedPtfxAsset(firehose.dictionary)
-	while not HasNamedPtfxAssetLoaded(firehose.dictionary) do
-		Citizen.Wait(0)
-	end
-	print('\n[PARTICLES] Finished updating particle directory.')
-
-	local particleEffect = 0
-	UseParticleFxAsset(firehose.dictionary)
-	
-	local pressed = false
-
-	while true do
-			Citizen.Wait(0)
-
-			if GetSelectedPedWeapon(PlayerPedId()) == GetHashKey('WEAPON_FIREEXTINGUISHER')  and (IsControlJustPressed(0, 24) or IsDisabledControlPressed(0, 24)) and not pressed then
-				--print('c1')
-				if enabled then
-					--UseParticleFxAsset(firehose.dictionary)
-					--particleEffect = StartNetworkedParticleFxLoopedOnEntity( firehose.particle, PlayerPedId(), 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 5.0, false, false, false )
-					pressed = true
-					TriggerServerEvent('StartParticleFxEffect:PhaseOne')
-				end
-			end
-
-			if GetSelectedPedWeapon(PlayerPedId()) == GetHashKey('WEAPON_FIREEXTINGUISHER') then
-				--print('c2')
-				if enabled then
-					DisablePlayerFiring(PlayerId(), true)
-					DisableControlAction(0, 24, true)
-					if pressed then
-						--SetParticleFxLoopedOffsets( particleEffect, 0.0, 0.0, 0.0, GetGameplayCamRelativePitch(), 0.0, 0.0 )
-						TriggerServerEvent('StartParticleFxEffect:PhaseTwo', GetGameplayCamRelativePitch() )
-					end
-				end
-			end
-
-			if (IsControlJustReleased(0, 24) or IsDisabledControlJustReleased(0, 24)) and pressed then
-				--print('c3')
-				if enabled then
-					--StopParticleFxLooped(particleEffect, 0)
-					TriggerServerEvent('StartParticleFxEffect:PhaseThree')
-					pressed = false
-				end
-			end
-	end
-end)
-
-function StartParticleFxEffect(dict, ptfx, posx, posy, posz)
-
-    Citizen.CreateThread(function()
-        UseParticleFxAssetNextCall(dict)
-        local pfx = StartParticleFxLoopedAtCoord(ptfx, posx, posy, posz, 0.0, 0.0, GetEntityHeading(PlayerPedId()), 1.0, false, false, false, false)
-        Citizen.Wait(100)
-        StopParticleFxLooped(pfx, 0)
-    end)
-
-end
-
-Citizen.CreateThread(function()
-	
-	while true do
-
-		SetParticleFxShootoutBoat(true)
-
-		if pressed then
-			Citizen.Wait(100)
-			local offset = GetOffsetFromEntityInWorldCoords(PlayerPedId(), 0.0, 12.0 + GetGameplayCamRelativePitch()* 0.4, 0.0)
-			local x = offset.x
-			local y = offset.y
-
-			local _,z = GetGroundZFor_3dCoord(x, y, off.z)
-
-			Citizen.Wait(GetGameplayCamRelativePitch())
-			--DrawLine(x, y, z - 0.2, x, y, z + 0.2, 255, 0, 0, 255)
-			--DrawLine(x, y, 0.0, x, y, 800.0, 255, 0, 0, 255)
-			--StartParticleFxEffect( firehose.dictionary, firehose.particle, x, y, z)
-			--TriggerServerEvent('FireScript:FirePutOut', x, y, z)
-            TriggerServerEvent('StartParticleFxEffect', firehose.dictionary, firehose.particle, x, y, z)
-
-		else
-			Citizen.Wait(0)
+function switchNozzle()
+    local playerPed = GetPlayerPed(-1)
+    if not hoseNozzle then
+        if HasPedGotWeapon(playerPed, weaponHash, false) then
+            SetCurrentPedWeapon(playerPed, weaponHash, true)
+            hasExtinguisher = true
+            extinguisherAmmo = GetAmmoInPedWeapon(playerPed, weaponHash)
+        else
+            GiveWeaponToPed(playerPed, weaponHash, 2000, true, true)
+        end
+        SetPedCurrentWeaponVisible(playerPed, false, false, false, false)
+        hoseNozzle = CreateObject(GetHashKey('prop_hose_nozzle'), 0, 0, 0, true, true, true)
+        AttachEntityToEntity(hoseNozzle, playerPed, GetPedBoneIndex(playerPed, 57005), 0.15, 0.14, -0.03, 30.0, 260.0, 170.0, true, false, false, true, 1, true)
+    else
+        DeleteEntity(hoseNozzle)
+        hoseNozzle = nil
+        SetPedCurrentWeaponVisible(playerPed, true, false, false, false)
+        SetCurrentPedWeapon(playerPed, GetHashKey('WEAPON_UNARMED'), true)
+        if hasExtinguisher then
+            hasExtinguisher = false
+            SetPedAmmo(playerPed, weaponHash, extinguisherAmmo)
+            extinguisherAmmo = 0
+        else
+            RemoveWeaponFromPed(playerPed, weaponHash)
         end
     end
-end)
+end
 
-local particleEffectSync = 0
-local particleEffectSync2 = 0
-RegisterNetEvent('Hose:StartParticle')
-AddEventHandler("Hose:StartParticle", function(dict, ptfx, posx, posy, posz, source)
-    Citizen.CreateThread(function()
-        UseParticleFxAssetNextCall(dict)
-        local pfx = StartParticleFxLoopedAtCoord(ptfx, posx, posy, posz, 0.0, 0.0, GetEntityHeading(GetPlayerPed(GetPlayerFromServerId(source))), 1.0, false, false, false, false)
-        Citizen.Wait(100)
-		StopParticleFxLooped(pfx, 0)
-    end)
-end)
+RegisterCommand(
+    "hose",
+    function(source, args, raw) --change command here
+        switchNozzle()
+    end,
+    false
+)
 
+RegisterNetEvent('baseevents:onPlayerDied')
+AddEventHandler(
+    'baseevents:onPlayerDied',
+    function()
+        if hoseNozzle ~= nil then
+            switchNozzle()
+        end
+    end
+)
 
-RegisterNetEvent('Hose:PhaseOne')
-AddEventHandler("Hose:PhaseOne", function(source)
-    
-    UseParticleFxAsset(firehose.dictionary)
-	particleEffectSync = StartNetworkedParticleFxLoopedOnEntity( firehose.particle, GetPlayerPed(GetPlayerFromServerId(source)), 10.0, 0.0, 0.0, 0.1, 0.0, 0.0, 1.0, false, false, false )
-	UseParticleFxAsset(firehose.dictionary)
-    particleEffectSync2 = StartNetworkedParticleFxLoopedOnEntity( firehose.particletwo, GetPlayerPed(GetPlayerFromServerId(source)), 10.0, 0.0, 0.0, 0.1, 0.0, 0.0, 1.0, false, false, false )
+RegisterNetEvent('onResourceStop')
+AddEventHandler(
+    'onResourceStop',
+    function(resourceName)
+        if resourceName == GetCurrentResourceName() and hoseNozzle ~= nil then
+            switchNozzle()
+        end
+    end
+)
 
-end)
+Citizen.CreateThread(
+    function()
+        RequestNamedPtfxAsset(dict)
 
+        while not HasNamedPtfxAssetLoaded(dict) do
+            Citizen.Wait(0)
+        end
+        
+        while true do
+            Citizen.Wait(1)
+            if hoseNozzle then
+                if pressed then
+                    Citizen.Wait(100)
 
-RegisterNetEvent('Hose:PhaseTwo')
-AddEventHandler("Hose:PhaseTwo", function(pitch, source)
+                    SetParticleFxShootoutBoat(true)
 
-	SetParticleFxLoopedOffsets( particleEffectSync, 0.0, 0.0, 0.0, pitch, 0.0, 0.0 )
-	SetParticleFxLoopedOffsets( particleEffectSync2, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0 )
+                    local entity = GetCurrentPedWeaponEntityIndex(ped)
+                    local multiplier = GetGameplayCamRelativePitch(ped) - GetEntityPitch(entity)
+                    local distance = 10
 
-end)
+                    if multiplier < 0 then
+                        distance = distance + (-9 * (multiplier / -52.0))
+                    elseif multiplier >= 0 and multiplier < 15 then
+                        distance = distance + (10 * multiplier / 15)
+                    else
+                        distance = distance + (-9 * (multiplier - 15) / 45)
+                    end
 
+                    local off = GetOffsetFromEntityInWorldCoords(
+                        entity,
+                        distance,
+                        -0.5,
+                        0.0
+                    )
 
-RegisterNetEvent('Hose:PhaseThree')
-AddEventHandler("Hose:PhaseThree", function(source)
+                    local x = off.x
+                    local y = off.y
+                    local offZ = off.z
 
-	StopParticleFxLooped(particleEffectSync, 0)
-	StopParticleFxLooped(particleEffectSync2, 0)
+                    if offZ > GetEntityCoords(entity).z then
+                        offZ = off.z - 2.0
+                    end
 
-end)
+                    local _, z = GetGroundZFor_3dCoord(x, y, offZ)
+
+                    Citizen.Wait(distance * 10)
+
+                    PlayEffect(dict, splashParticles, x, y, z)
+                else
+                    Citizen.Wait(0)
+                end
+            end
+        end
+    end
+)
+
+Citizen.CreateThread(
+    function()
+        local particleEffect = 0
+
+        while true do
+            Citizen.Wait(1)
+            if hoseNozzle then
+                if ped == nil then
+                    ped = GetPlayerPed(-1)
+                end
+                local selectedWeapon = GetSelectedPedWeapon(ped)
+                if selectedWeapon == weaponHash and (IsControlJustPressed(0, 24) or IsDisabledControlPressed(0, 24)) and not pressed then
+                    ped = GetPlayerPed(-1)
+                    pressed = true
+                    UseParticleFxAssetNextCall(dict)
+                    particleEffect = StartParticleFxLoopedOnEntity(
+                        streamParticles,
+                        GetCurrentPedWeaponEntityIndex(ped),
+                        0.35,
+                        0.0,
+                        -0.15,
+                        0.0,
+                        0.0,
+                        -90.0,
+                        1.0,
+                        false,
+                        false,
+                        false
+                    )
+                    TriggerServerEvent('hose:startParticleEffect')
+                end
+                if selectedWeapon == weaponHash then
+                    DisablePlayerFiring(PlayerId(), true)
+                    DisableControlAction(0, 24, true)
+                    if pressed then
+                        SetParticleFxLoopedOffsets(
+                            particleEffect,
+                            0.35,
+                            0.0,
+                            -0.15,
+                            -25.0,
+                            0.0,
+                            -90.0
+                        )
+                    end
+                end
+                if (IsControlJustReleased(0, 24) or IsDisabledControlJustReleased(0, 24)) and pressed then
+                    StopParticleFxLooped(particleEffect, 0)
+                    pressed = false
+                    TriggerServerEvent('hose:stopParticleEffect')
+                end
+                if selectedWeapon ~= weaponHash and hoseNozzle then
+                    switchNozzle(ped)
+                end
+            end
+        end
+    end
+)
+
+RegisterNetEvent('hose:stopParticleEffect')
+AddEventHandler(
+    'hose:stopParticleEffect',
+    function(playerId)
+        local playerPed = GetPlayerPed(GetPlayerFromServerId(playerId))
+        if playerPed ~= GetPlayerPed(-1) then
+            if ActiveEffects[playerPed] then
+                StopParticleFxLooped(ActiveEffects[playerPed], 0)
+            end
+        end
+    end
+)
+
+RegisterNetEvent('hose:startParticleEffect')
+AddEventHandler(
+    'hose:startParticleEffect',
+    function(playerId)
+        local playerPed = GetPlayerPed(GetPlayerFromServerId(playerId))
+        if playerPed ~= GetPlayerPed(-1) and playerPed ~= 0 then
+            UseParticleFxAssetNextCall(dict)
+            ActiveEffects[playerPed] = StartParticleFxLoopedOnEntity(
+                streamParticles,
+                GetCurrentPedWeaponEntityIndex(playerPed),
+                0.35,
+                0.0,
+                -0.15,
+                -25.0,
+                0.0,
+                -90.0,
+                1.0,
+                false,
+                false,
+                false
+            )
+        end
+    end
+)
+
+Citizen.CreateThread(
+    function()
+        Citizen.Wait(1)
+        for k, v in pairs(ActiveEffects) do
+            UseParticleFxAssetNextCall(dict)
+            ActiveEffects[k] = StartParticleFxLoopedOnEntity(
+                streamParticles,
+                GetCurrentPedWeaponEntityIndex(k),
+                0.0,
+                0.0,
+                0.0,
+                0.1,
+                0.0,
+                0.0,
+                1.0,
+                false,
+                false,
+                false
+            )
+        end
+    end
+)
+
+function PlayEffect(pdict, pname, posx, posy, posz, ped)
+    Citizen.CreateThread(
+        function()
+            local ped = ped or PlayerPedId()
+            UseParticleFxAssetNextCall(pdict)
+            local pfx = StartParticleFxLoopedAtCoord(
+                pname,
+                posx,
+                posy,
+                posz,
+                0.0,
+                0.0,
+                GetEntityHeading(ped),
+                1.0,
+                false,
+                false,
+                false,
+                false
+            )
+            Citizen.Wait(100)
+            StopParticleFxLooped(pfx, 0)
+        end
+    )
+end
